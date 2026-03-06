@@ -1,61 +1,54 @@
-const express  = require("express");
-const router   = express.Router();
-const Booking  = require("../models/Booking");
+const router = require("express").Router();
+const { Booking } = require("../models");
+const { protect } = require("../middleware/auth");
 
-// ── CREATE BOOKING ─────────────────────────────────────────────
+// ─── BOOK APPOINTMENT ────────────────────────────────────────────────────────
+// POST /api/bookings   (public — no login required)
 router.post("/", async (req, res) => {
   try {
-    const { name, phone, service, address, date, time, pincode, paymentMethod, paymentId, amount } = req.body;
-    if (!name || !phone || !service)
-      return res.status(400).json({ message: "Name, phone and service are required" });
+    const { name, phone, service, address, date, time, pincode, location, paymentMethod } = req.body;
 
-    const booking = await Booking.create({ name, phone, service, address, date, time, pincode, paymentMethod, paymentId, amount });
-    res.json({ message: "Booking confirmed successfully", booking });
+    if (!name || !phone || !service || !date || !time || !paymentMethod)
+      return res.status(400).json({ message: "Please fill all required fields" });
+
+    const booking = await Booking.create({
+      name, phone, service, address, date, time,
+      pincode, location, paymentMethod,
+      userId: req.user?._id || null,
+    });
+
+    res.status(201).json({
+      message: "Appointment booked successfully! We will contact you shortly.",
+      booking,
+    });
   } catch (err) {
     res.status(500).json({ message: "Server error", error: err.message });
   }
 });
 
-// ── GET ALL BOOKINGS (Admin) ───────────────────────────────────
-router.get("/", async (req, res) => {
+// ─── GET MY BOOKINGS (logged-in user) ────────────────────────────────────────
+// GET /api/bookings/my
+router.get("/my", protect, async (req, res) => {
   try {
-    const bookings = await Booking.find().sort({ createdAt: -1 });
+    const bookings = await Booking.find({ userId: req.user._id }).sort({ createdAt: -1 });
     res.json(bookings);
   } catch (err) {
     res.status(500).json({ message: "Server error", error: err.message });
   }
 });
 
-// ── GET SINGLE BOOKING ─────────────────────────────────────────
-router.get("/:id", async (req, res) => {
+// ─── CANCEL BOOKING ──────────────────────────────────────────────────────────
+// PATCH /api/bookings/:id/cancel
+router.patch("/:id/cancel", protect, async (req, res) => {
   try {
-    const booking = await Booking.findById(req.params.id);
+    const booking = await Booking.findOne({ _id: req.params.id, userId: req.user._id });
     if (!booking) return res.status(404).json({ message: "Booking not found" });
-    res.json(booking);
-  } catch (err) {
-    res.status(500).json({ message: "Server error", error: err.message });
-  }
-});
+    if (booking.status === "completed")
+      return res.status(400).json({ message: "Cannot cancel a completed booking" });
 
-// ── UPDATE BOOKING STATUS ──────────────────────────────────────
-router.put("/:id", async (req, res) => {
-  try {
-    const booking = await Booking.findByIdAndUpdate(
-      req.params.id,
-      { status: req.body.status },
-      { new: true }
-    );
-    res.json({ message: "Status updated successfully", booking });
-  } catch (err) {
-    res.status(500).json({ message: "Server error", error: err.message });
-  }
-});
-
-// ── DELETE BOOKING ─────────────────────────────────────────────
-router.delete("/:id", async (req, res) => {
-  try {
-    await Booking.findByIdAndDelete(req.params.id);
-    res.json({ message: "Booking deleted successfully" });
+    booking.status = "cancelled";
+    await booking.save();
+    res.json({ message: "Booking cancelled", booking });
   } catch (err) {
     res.status(500).json({ message: "Server error", error: err.message });
   }
